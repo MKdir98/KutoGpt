@@ -131,7 +131,9 @@ def start(agent_name: str, no_setup: bool):
     script_dir = os.path.dirname(os.path.realpath(__file__))
     agent_dir = os.path.join(
         script_dir,
-        f"agents/{agent_name}" if agent_name not in ["autogpt", "forge"] else agent_name,
+        f"agents/{agent_name}"
+        if agent_name not in ["autogpt", "forge"]
+        else agent_name,
     )
     run_command = os.path.join(agent_dir, "run")
     run_bench_command = os.path.join(agent_dir, "run_benchmark")
@@ -147,10 +149,11 @@ def start(agent_name: str, no_setup: bool):
             setup_process.wait()
             click.echo()
 
-        subprocess.Popen(["./run_benchmark", "serve"], cwd=agent_dir)
-        click.echo("⌛ (Re)starting benchmark server...")
-        wait_until_conn_ready(8080)
-        click.echo()
+        # FIXME: Doesn't work: Command not found: agbenchmark
+        # subprocess.Popen(["./run_benchmark", "serve"], cwd=agent_dir)
+        # click.echo("⌛ (Re)starting benchmark server...")
+        # wait_until_conn_ready(8080)
+        # click.echo()
 
         subprocess.Popen(["./run"], cwd=agent_dir)
         click.echo(f"⌛ (Re)starting agent '{agent_name}'...")
@@ -247,7 +250,9 @@ def start(agent_name, subprocess_args):
     script_dir = os.path.dirname(os.path.realpath(__file__))
     agent_dir = os.path.join(
         script_dir,
-        f"agents/{agent_name}" if agent_name not in ["autogpt", "forge"] else agent_name,
+        f"agents/{agent_name}"
+        if agent_name not in ["autogpt", "forge"]
+        else agent_name,
     )
     benchmark_script = os.path.join(agent_dir, "run_benchmark")
     if os.path.exists(agent_dir) and os.path.isfile(benchmark_script):

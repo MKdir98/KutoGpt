@@ -1,4 +1,3 @@
-import abc
 import os
 import typing
 from typing import Any, Callable, Generic, Optional, Type, TypeVar, get_args
@@ -17,6 +16,7 @@ def UserConfigurable(
     default_factory: Optional[Callable[[], T]] = None,
     from_env: Optional[str | Callable[[], T | None]] = None,
     description: str = "",
+    exclude: bool = False,
     **kwargs,
 ) -> T:
     # TODO: use this to auto-generate docs for the application configuration
@@ -26,6 +26,7 @@ def UserConfigurable(
         default_factory=default_factory,
         from_env=from_env,
         description=description,
+        exclude=exclude,
         **kwargs,
         user_configurable=True,
     )
@@ -85,11 +86,11 @@ class SystemSettings(BaseModel):
 S = TypeVar("S", bound=SystemSettings)
 
 
-class Configurable(abc.ABC, Generic[S]):
+class Configurable(Generic[S]):
     """A base class for all configurable objects."""
 
     prefix: str = ""
-    default_settings: typing.ClassVar[S]
+    default_settings: typing.ClassVar[S]  # type: ignore
 
     @classmethod
     def get_user_config(cls) -> dict[str, Any]:

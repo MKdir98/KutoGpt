@@ -2,42 +2,38 @@ from __future__ import annotations
 
 import copy
 import inspect
+import json
 import logging
 from abc import ABCMeta, abstractmethod
 from typing import (
-    TYPE_CHECKING,
     Any,
+    Awaitable,
     Callable,
+    Generic,
     Iterator,
     Optional,
     ParamSpec,
     TypeVar,
+    cast,
     overload,
 )
 
 from colorama import Fore
-from pydantic import BaseModel, Field, validator
-
-if TYPE_CHECKING:
-    from forge.models.action import ActionProposal, ActionResult
+from pydantic import BaseModel, Field, parse_raw_as, validator
 
 from forge.agent import protocols
 from forge.agent.components import (
     AgentComponent,
     ComponentEndpointError,
+    ConfigurableComponent,
     EndpointPipelineError,
 )
 from forge.config.ai_directives import AIDirectives
 from forge.config.ai_profile import AIProfile
-from forge.config.config import ConfigBuilder
 from forge.llm.providers import CHAT_MODELS, ModelName, OpenAIModelName
 from forge.llm.providers.schema import ChatModelInfo
-from forge.models.config import (
-    Configurable,
-    SystemConfiguration,
-    SystemSettings,
-    UserConfigurable,
-)
+from forge.models.action import ActionResult, AnyProposal
+from forge.models.config import SystemConfiguration, SystemSettings, UserConfigurable
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +45,11 @@ DEFAULT_TRIGGERING_PROMPT = (
     "and the progress you have made so far, "
     "and respond using the JSON schema specified previously:"
 )
+
+
+# HACK: This is a workaround wrapper to de/serialize component configs until pydantic v2
+class ModelContainer(BaseModel):
+    models: dict[str, BaseModel]
 
 
 class BaseAgentConfiguration(SystemConfiguration):
@@ -87,9 +88,6 @@ class BaseAgentConfiguration(SystemConfiguration):
     The token limit for prompt construction. Should leave room for the completion;
     defaults to 75% of `llm.max_tokens`.
     """
-
-    summary_max_tlength: Optional[int] = None
-    # TODO: move to ActionHistoryConfiguration
 
     @validator("use_functions_api")
     def validate_openai_functions(cls, v: bool, values: dict[str, Any]):
@@ -133,17 +131,7 @@ class AgentMeta(ABCMeta):
         return instance
 
 
-
-
-
-class BaseAgent(Configurable[BaseAgentSettings], metaclass=AgentMeta):
-    C = TypeVar("C", bound=AgentComponent)
-
-    default_settings = BaseAgentSettings(
-        name="BaseAgent",
-        description=__doc__ if __doc__ else "",
-    )
-
+class BaseAgent(Generic[AnyProposal], metaclass=AgentMeta):
     def __init__(
         self,
         settings: BaseAgentSettings,
@@ -173,13 +161,13 @@ class BaseAgent(Configurable[BaseAgentSettings], metaclass=AgentMeta):
         return self.config.send_token_limit or self.llm.max_tokens * 3 // 4
 
     @abstractmethod
-    async def propose_action(self) -> ActionProposal:
+    async def propose_action(self) -> AnyProposal:
         ...
 
     @abstractmethod
     async def execute(
         self,
-        proposal: ActionProposal,
+        proposal: AnyProposal,
         user_feedback: str = "",
     ) -> ActionResult:
         ...
@@ -187,7 +175,7 @@ class BaseAgent(Configurable[BaseAgentSettings], metaclass=AgentMeta):
     @abstractmethod
     async def do_not_execute(
         self,
-        denied_proposal: ActionProposal,
+        denied_proposal: AnyProposal,
         user_feedback: str,
     ) -> ActionResult:
         ...
@@ -203,13 +191,16 @@ class BaseAgent(Configurable[BaseAgentSettings], metaclass=AgentMeta):
 
     @overload
     async def run_pipeline(
-        self, protocol_method: Callable[P, None], *args, retry_limit: int = 3
+        self,
+        protocol_method: Callable[P, None | Awaitable[None]],
+        *args,
+        retry_limit: int = 3,
     ) -> list[None]:
         ...
 
     async def run_pipeline(
         self,
-        protocol_method: Callable[P, Iterator[T] | None],
+        protocol_method: Callable[P, Iterator[T] | None | Awaitable[None]],
         *args,
         retry_limit: int = 3,
     ) -> list[T] | list[None]:
@@ -240,7 +231,10 @@ class BaseAgent(Configurable[BaseAgentSettings], metaclass=AgentMeta):
                         )
                         continue
 
-                    method = getattr(component, method_name, None)
+                    method = cast(
+                        Callable[..., Iterator[T] | None | Awaitable[None]] | None,
+                        getattr(component, method_name, None),
+                    )
                     if not callable(method):
                         continue
 
@@ -248,10 +242,9 @@ class BaseAgent(Configurable[BaseAgentSettings], metaclass=AgentMeta):
                     while component_attempts < retry_limit:
                         try:
                             component_args = self._selective_copy(args)
-                            if inspect.iscoroutinefunction(method):
-                                result = await method(*component_args)
-                            else:
-                                result = method(*component_args)
+                            result = method(*component_args)
+                            if inspect.isawaitable(result):
+                                result = await result
                             if result is not None:
                                 method_result.extend(result)
                             args = component_args
@@ -269,9 +262,9 @@ class BaseAgent(Configurable[BaseAgentSettings], metaclass=AgentMeta):
                         break
                 # Successful pipeline execution
                 break
-            except EndpointPipelineError:
+            except EndpointPipelineError as e:
                 self._trace.append(
-                    f"❌ {Fore.LIGHTRED_EX}{component.__class__.__name__}: "
+                    f"❌ {Fore.LIGHTRED_EX}{e.triggerer.__class__.__name__}: "
                     f"EndpointPipelineError{Fore.RESET}"
                 )
                 # Restart from the beginning on EndpointPipelineError
@@ -282,6 +275,30 @@ class BaseAgent(Configurable[BaseAgentSettings], metaclass=AgentMeta):
             except Exception as e:
                 raise e
         return method_result
+
+    def dump_component_configs(self) -> str:
+        configs = {}
+        for component in self.components:
+            if isinstance(component, ConfigurableComponent):
+                config_type_name = component.config.__class__.__name__
+                configs[config_type_name] = component.config
+        data = ModelContainer(models=configs).json()
+        raw = parse_raw_as(dict[str, dict[str, Any]], data)
+        return json.dumps(raw["models"], indent=4)
+
+    def load_component_configs(self, serialized_configs: str):
+        configs_dict = parse_raw_as(dict[str, dict[str, Any]], serialized_configs)
+
+        for component in self.components:
+            if not isinstance(component, ConfigurableComponent):
+                continue
+            config_type = type(component.config)
+            config_type_name = config_type.__name__
+            if config_type_name in configs_dict:
+                # Parse the serialized data and update the existing config
+                updated_data = configs_dict[config_type_name]
+                data = {**component.config.dict(), **updated_data}
+                component.config = component.config.__class__(**data)
 
     def _collect_components(self):
         components = [
@@ -298,7 +315,7 @@ class BaseAgent(Configurable[BaseAgentSettings], metaclass=AgentMeta):
                         f"Component {component.__class__.__name__} "
                         "is attached to an agent but not added to components list"
                     )
-            # Skip collecting anf sorting and sort if ordering is explicit
+            # Skip collecting and sorting and sort if ordering is explicit
             return
         self.components = self._topological_sort(components)
 

@@ -1,5 +1,3 @@
-"""Commands to generate images based on text input"""
-
 import io
 import json
 import logging
@@ -7,32 +5,63 @@ import time
 import uuid
 from base64 import b64decode
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Literal, Optional
 
 import requests
 from openai import OpenAI
 from PIL import Image
+from pydantic import BaseModel, SecretStr
 
+from forge.agent.components import ConfigurableComponent
 from forge.agent.protocols import CommandProvider
 from forge.command import Command, command
-from forge.config.config import Config
 from forge.file_storage import FileStorage
+from forge.llm.providers.openai import OpenAICredentials
+from forge.models.config import UserConfigurable
 from forge.models.json_schema import JSONSchema
 
 logger = logging.getLogger(__name__)
 
 
-class ImageGeneratorComponent(CommandProvider):
+class ImageGeneratorConfiguration(BaseModel):
+    image_provider: Literal["dalle", "huggingface", "sdwebui"] = "dalle"
+    huggingface_image_model: str = "CompVis/stable-diffusion-v1-4"
+    huggingface_api_token: Optional[SecretStr] = UserConfigurable(
+        from_env="HUGGINGFACE_API_TOKEN", exclude=True
+    )
+    sd_webui_url: str = "http://localhost:7860"
+    sd_webui_auth: Optional[SecretStr] = UserConfigurable(
+        from_env="SD_WEBUI_AUTH", exclude=True
+    )
+
+
+class ImageGeneratorComponent(
+    CommandProvider, ConfigurableComponent[ImageGeneratorConfiguration]
+):
     """A component that provides commands to generate images from text prompts."""
 
-    def __init__(self, workspace: FileStorage, config: Config):
-        self._enabled = bool(config.image_provider)
+    config_class = ImageGeneratorConfiguration
+
+    def __init__(
+        self,
+        workspace: FileStorage,
+        config: Optional[ImageGeneratorConfiguration] = None,
+        openai_credentials: Optional[OpenAICredentials] = None,
+    ):
+        """openai_credentials only needed for `dalle` provider."""
+        ConfigurableComponent.__init__(self, config)
+        self.openai_credentials = openai_credentials
+        self._enabled = bool(self.config.image_provider)
         self._disabled_reason = "No image provider set."
         self.workspace = workspace
-        self.legacy_config = config
 
     def get_commands(self) -> Iterator[Command]:
-        yield self.generate_image
+        if (
+            self.openai_credentials
+            or self.config.huggingface_api_token
+            or self.config.sd_webui_auth
+        ):
+            yield self.generate_image
 
     @command(
         parameters={
@@ -43,7 +72,7 @@ class ImageGeneratorComponent(CommandProvider):
             ),
             "size": JSONSchema(
                 type=JSONSchema.Type.INTEGER,
-                description="The size of the image",
+                description="The size of the image [256, 512, 1024]",
                 required=False,
             ),
         },
@@ -61,16 +90,24 @@ class ImageGeneratorComponent(CommandProvider):
         """
         filename = self.workspace.root / f"{str(uuid.uuid4())}.jpg"
 
-        # DALL-E
-        if self.legacy_config.image_provider == "dalle":
+        if self.openai_credentials and (
+            self.config.image_provider == "dalle"
+            or not (self.config.huggingface_api_token or self.config.sd_webui_url)
+        ):
             return self.generate_image_with_dalle(prompt, filename, size)
-        # HuggingFace
-        elif self.legacy_config.image_provider == "huggingface":
+
+        elif self.config.huggingface_api_token and (
+            self.config.image_provider == "huggingface"
+            or not (self.openai_credentials or self.config.sd_webui_url)
+        ):
             return self.generate_image_with_hf(prompt, filename)
-        # SD WebUI
-        elif self.legacy_config.image_provider == "sdwebui":
+
+        elif self.config.sd_webui_url and (
+            self.config.image_provider == "sdwebui" or self.config.sd_webui_auth
+        ):
             return self.generate_image_with_sd_webui(prompt, filename, size)
-        return "No Image Provider Set"
+
+        return "Error: No image generation provider available"
 
     def generate_image_with_hf(self, prompt: str, output_file: Path) -> str:
         """Generate an image with HuggingFace's API.
@@ -82,13 +119,15 @@ class ImageGeneratorComponent(CommandProvider):
         Returns:
             str: The filename of the image
         """
-        API_URL = f"https://api-inference.huggingface.co/models/{self.legacy_config.huggingface_image_model}"  # noqa: E501
-        if self.legacy_config.huggingface_api_token is None:
+        API_URL = f"https://api-inference.huggingface.co/models/{self.config.huggingface_image_model}"  # noqa: E501
+        if self.config.huggingface_api_token is None:
             raise ValueError(
                 "You need to set your Hugging Face API token in the config file."
             )
         headers = {
-            "Authorization": f"Bearer {self.legacy_config.huggingface_api_token}",
+            "Authorization": (
+                f"Bearer {self.config.huggingface_api_token.get_secret_value()}"
+            ),
             "X-Use-Cache": "false",
         }
 
@@ -142,6 +181,7 @@ class ImageGeneratorComponent(CommandProvider):
         Returns:
             str: The filename of the image
         """
+        assert self.openai_credentials  # otherwise this tool is disabled
 
         # Check for supported image sizes
         if size not in [256, 512, 1024]:
@@ -152,16 +192,22 @@ class ImageGeneratorComponent(CommandProvider):
             )
             size = closest
 
+        # TODO: integrate in `forge.llm.providers`(?)
         response = OpenAI(
-            api_key=self.legacy_config.openai_credentials.api_key.get_secret_value()
+            api_key=self.openai_credentials.api_key.get_secret_value(),
+            organization=self.openai_credentials.organization.get_secret_value()
+            if self.openai_credentials.organization
+            else None,
         ).images.generate(
             prompt=prompt,
             n=1,
-            size=f"{size}x{size}",
+            # TODO: improve typing of size config item(s)
+            size=f"{size}x{size}",  # type: ignore
             response_format="b64_json",
         )
+        assert response.data[0].b64_json is not None  # response_format = "b64_json"
 
-        logger.info(f"Image Generated for prompt:{prompt}")
+        logger.info(f"Image Generated for prompt: {prompt}")
 
         image_data = b64decode(response.data[0].b64_json)
 
@@ -190,13 +236,13 @@ class ImageGeneratorComponent(CommandProvider):
         """
         # Create a session and set the basic auth if needed
         s = requests.Session()
-        if self.legacy_config.sd_webui_auth:
-            username, password = self.legacy_config.sd_webui_auth.split(":")
+        if self.config.sd_webui_auth:
+            username, password = self.config.sd_webui_auth.get_secret_value().split(":")
             s.auth = (username, password or "")
 
         # Generate the images
         response = requests.post(
-            f"{self.legacy_config.sd_webui_url}/sdapi/v1/txt2img",
+            f"{self.config.sd_webui_url}/sdapi/v1/txt2img",
             json={
                 "prompt": prompt,
                 "negative_prompt": negative_prompt,

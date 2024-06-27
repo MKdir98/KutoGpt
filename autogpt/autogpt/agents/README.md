@@ -24,12 +24,12 @@ class MyAgent(Agent):
     def __init__(
         self,
         settings: AgentSettings,
-        llm_provider: ChatModelProvider,
+        llm_provider: MultiProvider
         file_storage: FileStorage,
-        legacy_config: Config,
+        app_config: AppConfig,
     ):
         # Call the parent constructor to bring in the default components
-        super().__init__(settings, llm_provider, file_storage, legacy_config)
+        super().__init__(settings, llm_provider, file_storage, app_config)
         # Add your custom component
         self.my_component = MyComponent()
 ```

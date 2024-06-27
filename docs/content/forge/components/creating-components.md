@@ -93,12 +93,13 @@ To learn more about commands see [🛠️ Commands](./commands.md).
 
 After components provided all necessary data, the agent needs to build the final prompt that will be send to a llm.
 Currently, `PromptStrategy` (*not* a protocol) is responsible for building the final prompt.
-If you want to change the way the prompt is built, you need to create a new `PromptStrategy` class, and then call relavant methods in your agent class.
+
+If you want to change the way the prompt is built, you need to create a new `PromptStrategy` class, and then call relevant methods in your agent class.
 You can have a look at the default strategy used by the AutoGPT Agent: [OneShotAgentPromptStrategy](https://github.com/Significant-Gravitas/AutoGPT/tree/master/autogpt/autogpt/agents/prompt_strategies/one_shot.py), and how it's used in the [Agent](https://github.com/Significant-Gravitas/AutoGPT/tree/master/autogpt/autogpt/agents/agent.py) (search for `self.prompt_strategy`).
 
 ## Example `UserInteractionComponent`
 
-Let's create a slighlty simplified version of the component that is used by the built-in agent.
+Let's create a slightly simplified version of the component that is used by the built-in agent.
 It gives an ability for the agent to ask user for input in the terminal.
 
 1. Create a class for the component that inherits from `CommandProvider`.
@@ -147,12 +148,12 @@ It gives an ability for the agent to ask user for input in the terminal.
         yield self.ask_user
     ```
 
-5. Since agent isn't always running in the terminal or interactive mode, we need to disable this component by setting `self._enabled` when it's not possible to ask for user input.
+5. Since agent isn't always running in the terminal or interactive mode, we need to disable this component by setting `self._enabled=False` when it's not possible to ask for user input.
 
     ```py
-    def __init__(self, config: Config):
+    def __init__(self, interactive_mode: bool):
         self.config = config
-        self._enabled = not config.noninteractive_mode
+        self._enabled = interactive_mode
     ```
 
 The final component should look like this:
@@ -163,10 +164,10 @@ class MyUserInteractionComponent(CommandProvider):
     """Provides commands to interact with the user."""
 
     # We pass config to check if we're in noninteractive mode
-    def __init__(self, config: Config):
+    def __init__(self, interactive_mode: bool):
         self.config = config
         # 5.
-        self._enabled = not config.noninteractive_mode
+        self._enabled = interactive_mode
 
     # 4.
     def get_commands(self) -> Iterator[Command]:
@@ -202,12 +203,12 @@ class MyAgent(Agent):
     def __init__(
         self,
         settings: AgentSettings,
-        llm_provider: ChatModelProvider,
+        llm_provider: MultiProvider,
         file_storage: FileStorage,
-        legacy_config: Config,
+        app_config: Config,
     ):
         # Call the parent constructor to bring in the default components
-        super().__init__(settings, llm_provider, file_storage, legacy_config)
+        super().__init__(settings, llm_provider, file_storage, app_config)
         # Disable the default user interaction component by overriding it
         self.user_interaction = MyUserInteractionComponent()
 ```
@@ -219,16 +220,16 @@ class MyAgent(Agent):
     def __init__(
         self,
         settings: AgentSettings,
-        llm_provider: ChatModelProvider,
+        llm_provider: MultiProvider,
         file_storage: FileStorage,
-        legacy_config: Config,
+        app_config: Config,
     ):
         # Call the parent constructor to bring in the default components
-        super().__init__(settings, llm_provider, file_storage, legacy_config)
+        super().__init__(settings, llm_provider, file_storage, app_config)
         # Disable the default user interaction component
         self.user_interaction = None
         # Add our own component
-        self.my_user_interaction = MyUserInteractionComponent(legacy_config)
+        self.my_user_interaction = MyUserInteractionComponent(app_config)
 ```
 
 ## Learn more
