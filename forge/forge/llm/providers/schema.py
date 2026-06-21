@@ -56,6 +56,7 @@ class ModelProviderName(str, enum.Enum):
     ANTHROPIC = "anthropic"
     HUGGINGCHAT = "huggingchat"
     GPT4FREE = "gpt4free"
+    GROQ = "groq"
 
 
 class ChatMessage(BaseModel):

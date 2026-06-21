@@ -18,11 +18,6 @@ autogpt = "autogpt.app.cli:cli"
 multi_agent = "autogpt.app.cli:run_multi_agent"
 serve = "autogpt.app.cli:serve"
 
-[tool.pyright]
-pythonPath = ["../forge"]
-extraPaths = ["../forge"]
-
-
 [tool.poetry.dependencies]
 python = "^3.10"
 anthropic = "^0.25.1"
@@ -116,9 +111,8 @@ skip_glob = ["data"]
 
 
 [tool.pyright]
-pythonVersion = "3.10"
-exclude = ["data/**", "**/node_modules", "**/__pycache__", "**/.*"]
-ignore = ["../forge/**"]
+pythonPath = [".venv/lib/python3.10/site-packages", "../forge"]
+extraPaths = [".venv/lib/python3.10/site-packages", "../forge"]
 
 
 [tool.pytest.ini_options]

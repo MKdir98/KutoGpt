@@ -8,12 +8,13 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Callable, Optional, ParamSpec, TypeVar
+from typing import Callable, Optional, ParamSpec, TypeVar, Sequence
 
 import tiktoken
 import yaml
 from pydantic import SecretStr
 
+from ._openai_base import BaseOpenAIChatProvider, BaseOpenAIEmbeddingProvider
 from forge.models.config import Configurable, UserConfigurable
 from forge.models.providers import Embedding
 
@@ -22,7 +23,6 @@ from .schema import (
     AssistantToolCallDict,
     ChatMessage,
     ChatModelInfo,
-    ChatModelProvider,
     ChatModelResponse,
     CompletionModelFunction,
     EmbeddingModelInfo,
@@ -31,6 +31,7 @@ from .schema import (
     ModelProviderConfiguration,
     ModelProviderCredentials,
     ModelProviderName,
+    BaseChatModelProvider,
     ModelProviderService,
     ModelProviderSettings,
     ModelTokenizer,
@@ -341,9 +342,14 @@ class Gpt4FreeCredentials(ModelProviderCredentials):
 
 
 class GPT4FreeProvider(
-    Configurable[ModelProviderSettings], ChatModelProvider
+        BaseChatModelProvider[Gpt4FreeModelName, ModelProviderSettings]
 ):
     async def get_available_models(self) -> list[ChatModelInfo]:
+        return list(GPT_4_FREE_CHAT_MODELS.values())
+
+    async def get_available_chat_models(
+        self,
+    ) -> Sequence[ChatModelInfo[Gpt4FreeModelName]]:
         return list(GPT_4_FREE_CHAT_MODELS.values())
 
     default_settings = ModelProviderSettings(
@@ -357,7 +363,6 @@ class GPT4FreeProvider(
 
     _budget: ModelProviderBudget
 
-    _provider_instances: dict[ModelProviderName, ChatModelProvider]
 
     def __init__(
         self,
@@ -367,7 +372,6 @@ class GPT4FreeProvider(
         super(GPT4FreeProvider, self).__init__(settings=settings, logger=logger)
         self._budget = self._settings.budget or ModelProviderBudget()
 
-        self._provider_instances = {}
     def get_token_limit(self, model_name: str) -> int:
         """Get the token limit for a given model."""
         return GPT_4_FREE_MODELS[model_name].max_tokens
@@ -470,9 +474,10 @@ class GPT4FreeProvider(
 
                 nest_asyncio.apply()
                 client = Client()
+                # print(json_messages)
                 gptResponse = client.chat.completions.create(
                     model="llama3-70b", messages=json_messages,
-                    # provider=HuggingChat
+                    provider=HuggingChat
                 )
                 response = str(gptResponse.choices[0].message.content)
                 # print("response")

@@ -415,7 +415,7 @@ async def run_auto_gpt_server(
     )
 
 
-def _configure_gpt_4_free_provider(config: Config) -> GPT4FreeProvider:
+def _configure_gpt_4_free_provider(config: AppConfig) -> GPT4FreeProvider:
     """Create a configured HuggingChatProvider object.
 
     Args:
@@ -841,10 +841,10 @@ async def run_multi_agents_auto_gpt(
 
     await apply_overrides_to_config(
         config=config,
-        gpt3only=gpt3only,
-        gpt4only=gpt4only,
-        browser_name=browser_name,
-        allow_downloads=allow_downloads,
+        continuous=continuous,
+        continuous_limit=continuous_limit,
+        skip_reprompt=skip_reprompt,
+        skip_news=skip_news,
     )
 
     # Set up logging module
@@ -957,7 +957,8 @@ async def run_multi_agents_auto_gpt(
         #     " with as much detail as possible:",
         # )
 
-        task = "Create a group of developers work on autogpt project in github and get it better"
+        # task = "Create a group of developers work on autogpt project in github and get it better"
+        task = "Find the best Coin in top 100 Coin in cryptocurrency for hour buy"
 
         agent_members = []
         if not len(member_descriptions) == 0:
@@ -1022,8 +1023,8 @@ async def run_interaction_loop_for_agent_group(
         None
     """
     # These contain both application config and agent config, so grab them here.
-    legacy_config = agent_group.leader.legacy_config
-    ai_profile = agent_group.leader.ai_profile
+    legacy_config = agent_group.leader.app_config
+    ai_profile = agent_group.leader.state.ai_profile
     logger = logging.getLogger(__name__)
 
     cycle_budget = cycles_remaining = _get_cycle_budget(

@@ -49,7 +49,7 @@ class WebSearchComponent(
         yield "Internet access for searches and information gathering."
 
     def get_commands(self) -> Iterator[Command]:
-        yield self.web_search
+        # yield self.web_search
 
         if self.config.google_api_key and self.config.google_custom_search_engine_id:
             yield self.google

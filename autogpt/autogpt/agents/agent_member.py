@@ -21,10 +21,11 @@ from forge.utils.exceptions import UnknownCommandError
 from .task_management import TaskManagementComponent
 from .agent_management import AgentManagementComponent
 from forge.components.action_history import EpisodicActionHistory
-from forge.config.config import Config, ConfigBuilder
+from autogpt.app.config import AppConfig, ConfigBuilder
 from forge.file_storage import FileStorage
 from forge.llm.prompting import ChatPrompt
-from forge.llm.providers.schema import AssistantChatMessage, ChatMessage, ChatModelProvider, CompletionModelFunction
+from forge.llm.providers.schema import AssistantChatMessage, ChatMessage, CompletionModelFunction
+from forge.llm.providers import MultiProvider
 from forge.models.action import ActionErrorResult, ActionResult, ActionSuccessResult
 from forge.command import Command
 from forge.agent_protocol.models.task import Task
@@ -120,9 +121,9 @@ class AgentMember(Agent):
     def __init__(
         self,
         settings: AgentMemberSettings,
-        llm_provider: ChatModelProvider,
+        llm_provider: MultiProvider,
         file_storage: FileStorage,
-        legacy_config: Config,
+        legacy_config: AppConfig,
         boss: Optional["AgentMember"] = None,
         recruiter: Optional["AgentMember"] = None,
         # tasks: list["AgentTask"] = [],
@@ -172,7 +173,7 @@ class AgentMember(Agent):
             include_os_info=True,
             tasks=tasks,
             agent_member=self,
-            ai_profile=self.ai_profile,
+            ai_profile=self.state.ai_profile,
             ai_directives=directives,
             commands=function_specs_from_commands(self.commands),
             event_history=self.event_history,
@@ -308,9 +309,9 @@ class AgentMember(Agent):
 
 async def create_agent_member(
     state: AgentMemberSettings,
-    app_config: Config,
+    app_config: AppConfig,
     file_storage: FileStorage,
-    llm_provider: ChatModelProvider,
+    llm_provider: MultiProvider,
     boss: Optional["AgentMember"] = None,
     recruiter: Optional["AgentMember"] = None,
 ) -> "AgentMember":
@@ -341,7 +342,7 @@ async def generate_agent_settings_for_task(
     tasks: list[AgentTaskSettings],
     members: list[str],
     create_agent: bool,
-    llm_provider: ChatModelProvider,
+    llm_provider: MultiProvider,
     app_config,
 ) -> AgentMemberSettings:
     agent_profile_generator = AgentProfileGenerator(
@@ -386,7 +387,7 @@ async def create_agent_member_from_task(
     role: str,
     prompt: str,
     file_storage: FileStorage,
-    llm_provider: ChatModelProvider,
+    llm_provider: MultiProvider,
     boss_id=None,
 ):
     config = ConfigBuilder.build_config_from_env()

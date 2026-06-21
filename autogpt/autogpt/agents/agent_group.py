@@ -6,10 +6,10 @@ from autogpt.agents.agent_member import (
     AgentMemberSettings,
     AgentTaskSettings,
 )
+from autogpt.app.config import ConfigBuilder
 from forge.agent_protocol.api_router import TaskRequestBody
-from forge.config.config import ConfigBuilder
 from forge.file_storage import FileStorage
-from forge.llm.providers.schema import ChatModelProvider
+from forge.llm.providers import MultiProvider
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class AgentGroup:
     def configure_agent_group_with_state(
         state: AgentMemberSettings,
         file_storage: FileStorage,
-        llm_provider: ChatModelProvider,
+        llm_provider: MultiProvider,
     ) -> "AgentGroup":
         config = ConfigBuilder.build_config_from_env()
         config.logging.plain_console_output = True
@@ -90,7 +90,7 @@ class AgentGroup:
 
     @staticmethod
     def create_agents_and_tasks_dict_from_state(
-        agent: "AgentMember", file_storage: FileStorage, llm_provider: ChatModelProvider
+        agent: "AgentMember", file_storage: FileStorage, llm_provider: MultiProvider
     ) -> tuple[dict[str, AgentMember], dict[str, AgentTaskSettings]]:
         agent_manager = AgentManager(file_storage)
         agents = {}

@@ -91,6 +91,8 @@ profile = "black"
 
 [tool.pyright]
 pythonVersion = "3.10"
+pythonPath = [".venv/lib/python3.10/site-packages"]
+extraPaths = [".venv/lib/python3.10/site-packages"]
 
 
 [tool.pytest.ini_options]

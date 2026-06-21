@@ -3,7 +3,8 @@
 from __future__ import annotations
 from typing import Iterator
 
-from forge.config.config import ConfigBuilder, FileStorageBackendName
+from forge.file_storage import FileStorageBackendName, get_storage
+from autogpt.app.config import ConfigBuilder
 from forge.file_storage import get_storage
 from forge.models.json_schema import JSONSchema
 from forge.agent.protocols import CommandProvider
